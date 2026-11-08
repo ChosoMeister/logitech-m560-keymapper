@@ -86,6 +86,19 @@ final class PointerSource: @unchecked Sendable {
         defer { lock.unlock() }
         return lastSourceWasM560
     }
+
+    private var lastSample: CFAbsoluteTime = 0
+    private static let sampleInterval: CFAbsoluteTime = 0.2
+
+    /// Rate limits the expensive IOHID lookup done for pointer motion.
+    func shouldResample() -> Bool {
+        let now = CFAbsoluteTimeGetCurrent()
+        lock.lock()
+        defer { lock.unlock() }
+        guard now - lastSample >= Self.sampleInterval else { return false }
+        lastSample = now
+        return true
+    }
 }
 
 // MARK: - Mapper
@@ -269,7 +282,13 @@ func mapperCallback(
     let options = MapperOptions.shared
 
     if [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged].contains(type) {
-        pointerSourceUpdate(event)
+        // Pointer motion arrives at the device's full report rate. Reading the
+        // backing IOHID event costs far more than this callback's time budget
+        // allows at that rate, so sample the pointer's owner occasionally
+        // instead of on every move; it only feeds the wheel-tilt fallback.
+        if PointerSource.shared.shouldResample() {
+            pointerSourceUpdate(event)
+        }
         if MiddleButtonState.shared.held, type == .mouseMoved {
             injectionQueue.async { postMiddleDrag(at: event.location) }
             return nil
@@ -379,6 +398,8 @@ final class EventMapper {
     var diagnoseOnly = false
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var tapRunLoop: CFRunLoop?
+    private var tapThread: Thread?
 
     private static let eventTypes: [CGEventType] = [
         .flagsChanged, .keyDown, .keyUp,
@@ -390,35 +411,65 @@ final class EventMapper {
         mask | (CGEventMask(1) << type.rawValue)
     }
 
+    /// The tap runs on its own high-priority thread. On the main runloop any
+    /// SwiftUI work would sit in front of the callback, and because a tap
+    /// callback blocks delivery of every event it sees, that showed up as
+    /// system-wide input lag.
     @discardableResult
     func start() -> Bool {
         guard !isRunning else { return true }
-        guard let tap = CGEvent.tapCreate(
-            tap: .cghidEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: Self.eventMask,
-            callback: mapperCallback,
-            userInfo: nil
-        ) else { return false }
 
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        self.tap = tap
-        self.runLoopSource = source
-        isRunning = true
-        return true
+        let ready = DispatchSemaphore(value: 0)
+        var created = false
+
+        let thread = Thread { [weak self] in
+            guard let self else { ready.signal(); return }
+            guard let tap = CGEvent.tapCreate(
+                tap: .cghidEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: Self.eventMask,
+                callback: mapperCallback,
+                userInfo: nil
+            ) else {
+                ready.signal()
+                return
+            }
+
+            let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            self.tap = tap
+            self.runLoopSource = source
+            self.tapRunLoop = CFRunLoopGetCurrent()
+            created = true
+            ready.signal()
+
+            CFRunLoopRun()
+
+            // Reached only after stop() stops this runloop.
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CFMachPortInvalidate(tap)
+            self.tap = nil
+            self.runLoopSource = nil
+            self.tapRunLoop = nil
+        }
+        thread.name = "M560Mapper.event-tap"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        self.tapThread = thread
+
+        ready.wait()
+        isRunning = created
+        return created
     }
 
     func stop() {
-        guard isRunning, let tap, let runLoopSource else { return }
+        guard isRunning, let tapRunLoop, let tap else { return }
         if MiddleButtonState.shared.release() { enqueueMiddleButton(down: false) }
         CGEvent.tapEnable(tap: tap, enable: false)
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        CFMachPortInvalidate(tap)
-        self.tap = nil
-        self.runLoopSource = nil
+        CFRunLoopStop(tapRunLoop)
+        tapThread = nil
         isRunning = false
     }
 
