@@ -295,7 +295,8 @@ func mapperCallback(
     _ event: CGEvent,
     _ userInfo: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
-    if event.getIntegerValueField(.eventSourceUserData) == injectedEventMarker {
+    let isInjected = event.getIntegerValueField(.eventSourceUserData) == injectedEventMarker
+    if isInjected, !EventMapper.shared.diagnoseOnly {
         return Unmanaged.passUnretained(event)
     }
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -326,7 +327,7 @@ func mapperCallback(
     if EventMapper.shared.diagnoseOnly {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let button = event.getIntegerValueField(.mouseEventButtonNumber)
-        logVerbose("diag type=\(eventName(type)) key=\(keyCode) button=\(button) flags=\(event.flags.rawValue) sender=\(sender.map(String.init) ?? "none") receiver=\(isReceiver)")
+        logVerbose("diag\(isInjected ? "[ours]" : "") type=\(eventName(type)) key=\(keyCode) button=\(button) flags=\(event.flags.rawValue) sender=\(sender.map(String.init) ?? "none") receiver=\(isReceiver)")
         return Unmanaged.passUnretained(event)
     }
 
