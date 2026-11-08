@@ -20,15 +20,6 @@ private let registrySearchRecursive: UInt32 = 1
 private let diagnoseOnly = CommandLine.arguments.contains("--diagnose")
 private let checkPermissionsOnly = CommandLine.arguments.contains("--check-permissions")
 private let traceTilts = CommandLine.arguments.contains("--trace")
-private let browserBundleIdentifiers: Set<String> = [
-    "com.apple.Safari",
-    "com.microsoft.edgemac",
-    "com.google.Chrome",
-    "org.mozilla.firefox",
-    "com.brave.Browser",
-    "company.thebrowser.Browser",
-]
-
 private final class PendingKeyUps: @unchecked Sendable {
     private let lock = NSLock()
     private var tabIsDown = false
@@ -178,11 +169,33 @@ private func enqueueShortcut(keyCode: CGKeyCode, modifiers: CGEventFlags) {
     }
 }
 
-private func isBrowserFrontmost() -> Bool {
-    guard let bundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
-        return false
+private func postMiddleClick() {
+    guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+    let location = CGEvent(source: nil)?.location ?? .zero
+    guard let down = CGEvent(
+        mouseEventSource: source,
+        mouseType: .otherMouseDown,
+        mouseCursorPosition: location,
+        mouseButton: .center
+    ), let up = CGEvent(
+        mouseEventSource: source,
+        mouseType: .otherMouseUp,
+        mouseCursorPosition: location,
+        mouseButton: .center
+    ) else { return }
+
+    for event in [down, up] {
+        event.flags = []
+        event.setIntegerValueField(.eventSourceUserData, value: injectedEventMarker)
     }
-    return browserBundleIdentifiers.contains(bundleIdentifier)
+    down.post(tap: .cghidEventTap)
+    up.post(tap: .cghidEventTap)
+}
+
+private func enqueueMiddleClick() {
+    injectionQueue.async {
+        postMiddleClick()
+    }
 }
 
 private func callback(
@@ -241,6 +254,10 @@ private func callback(
         // M560 back button reports left Command+D. Swallow the modifier edge;
         // the D key event below performs the desktop navigation.
         if keyCode == 0x37 { return nil }
+        // The M560 wheel click also emits left Option and left Control as part
+        // of its keyboard chord. Suppress them so only the synthesized,
+        // unmodified middle click reaches the active app.
+        if keyCode == 0x3a || keyCode == 0x3b { return nil }
         return Unmanaged.passUnretained(event)
 
     case .keyDown, .keyUp:
@@ -248,10 +265,10 @@ private func callback(
         let isMiddleButtonChord = keyCode == 0x30
             && event.flags.contains(.maskCommand)
             && event.flags.contains(.maskControl)
-        if type == .keyDown, isMiddleButtonChord, isBrowserFrontmost() {
+        if type == .keyDown, isMiddleButtonChord {
             if pendingKeyUps.beginTabPress() {
-                FileHandle.standardError.write(Data("map M560 Control+Command+Tab -> close browser tab\n".utf8))
-                enqueueShortcut(keyCode: 0x0d, modifiers: .maskCommand)
+                FileHandle.standardError.write(Data("map M560 Control+Command+Tab -> middle click\n".utf8))
+                enqueueMiddleClick()
             }
             return nil
         }
