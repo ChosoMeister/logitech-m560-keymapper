@@ -130,23 +130,25 @@ final class MapperOptions: @unchecked Sendable {
     }
 }
 
-/// Capturing four slow taps settled what the chords mean: Option+Command
-/// arrives on every single press, while Control+Command+Tab appeared once in
-/// four and sometimes seconds later. It is not the button's release edge, so
-/// treating it as one left the synthetic button down and made every second
-/// press post a stray release — the button appearing to work every other time.
+/// Neither chord is an edge of the button: both mean "pressed", and the
+/// firmware is erratic about which it sends. Captures show presses that emit
+/// only Option+Command, presses that emit only Control+Command+Tab, and
+/// presses that emit both, the second 320-480ms behind the first.
 ///
-/// Option+Command is therefore the whole press, emitted as one complete click,
-/// and the Tab chord is suppressed without emitting anything.
+/// So either chord fires a click, and this window collapses the pairs. Taps
+/// land about 1.2s apart, well clear of it. The cost is a press held for
+/// longer than the window, which can emit the second chord late enough to
+/// click twice; the hardware gives nothing that marks a button still held, so
+/// that case cannot be told apart from two quick presses.
 private final class MiddleButtonState: @unchecked Sendable {
     static let shared = MiddleButtonState()
-    private static let window: CFAbsoluteTime = 0.25
+    private static let window: CFAbsoluteTime = 0.8
 
     private let lock = NSLock()
     private var lastFiredAt: CFAbsoluteTime = 0
 
-    /// Guards only against the same chord being seen twice in a row; taps
-    /// land about a second apart, so this never swallows a real press.
+    /// True when this chord should click, false when it is the second chord
+    /// of a press that has already clicked.
     func fire() -> Bool {
         let now = CFAbsoluteTimeGetCurrent()
         lock.lock()
@@ -387,7 +389,10 @@ func mapperCallback(
             && event.flags.contains(.maskCommand)
             && event.flags.contains(.maskControl)
         if options.middleClick, type == .keyDown, isMiddleButtonChord {
-            // Suppressed only; the Option+Command chord already clicked.
+            if MiddleButtonState.shared.fire() {
+                log("map wheel press (control+command+tab) -> middle click")
+                enqueueMiddleClick()
+            }
             return nil
         }
         if options.middleClick, type == .keyUp, keyCode == 0x30 {
