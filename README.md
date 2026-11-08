@@ -53,11 +53,48 @@ panel with:
 macOS asks for Accessibility permission the first time the mapper is enabled.
 Grant it under System Settings → Privacy & Security → Accessibility.
 
-The build is ad-hoc signed, and TCC binds an ad-hoc grant to the binary's
-cdhash, so **every rebuild voids the Accessibility grant**. After rebuilding,
-remove the old M560Mapper entry with `−` and let the app's own prompt register
-the new binary; re-ticking the stale entry grants nothing. The app only tries
-to create its tap at launch, so quit and reopen it once the grant is in place.
+The app retries the tap every two seconds while it is switched on, so it picks
+the grant up on its own without being quit and reopened.
+
+## Signing
+
+TCC binds an Accessibility grant to the signing identity. Ad-hoc signing has no
+identity beyond the binary's cdhash, so every rebuild voided the grant. The
+build therefore signs with a local self-signed certificate, which keeps one
+identity across rebuilds:
+
+```
+designated => identifier "com.mustafa.m560mapper" and certificate leaf = H"..."
+```
+
+Create it once, then rebuild and grant Accessibility a final time:
+
+```sh
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 \
+	-nodes -subj "/CN=M560Mapper Self-Signed" \
+	-addext "basicConstraints=critical,CA:false" \
+	-addext "keyUsage=critical,digitalSignature" \
+	-addext "extendedKeyUsage=critical,codeSigning"
+```
+
+```sh
+openssl pkcs12 -export -inkey key.pem -in cert.pem -out id.p12 -passout pass:m560 \
+	-name "M560Mapper Self-Signed" \
+	-certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
+```
+
+```sh
+security import id.p12 -k ~/Library/Keychains/login.keychain-db -P m560 -T /usr/bin/codesign
+```
+
+```sh
+security add-trusted-cert -r trustRoot -p codeSign -k ~/Library/Keychains/login.keychain-db cert.pem
+```
+
+Delete `key.pem` and `id.p12` afterwards; the private key lives in the keychain.
+Apple's keychain import rejects modern PKCS#12 encryption, which is why the
+legacy `-certpbe`/`-keypbe`/`-macalg` flags are needed. Without this identity
+the build falls back to ad-hoc and says so.
 
 ## Log
 
