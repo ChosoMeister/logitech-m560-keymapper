@@ -20,6 +20,35 @@ private let registrySearchRecursive: UInt32 = 1
 private let diagnoseOnly = CommandLine.arguments.contains("--diagnose")
 private let checkPermissionsOnly = CommandLine.arguments.contains("--check-permissions")
 private let traceTilts = CommandLine.arguments.contains("--trace")
+private let browserBundleIdentifiers: Set<String> = [
+    "com.apple.Safari",
+    "com.microsoft.edgemac",
+    "com.google.Chrome",
+    "org.mozilla.firefox",
+    "com.brave.Browser",
+    "company.thebrowser.Browser",
+]
+
+private final class PendingKeyUps: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tabIsDown = false
+
+    func beginTabPress() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !tabIsDown else { return false }
+        tabIsDown = true
+        return true
+    }
+
+    func consumeTabRelease() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard tabIsDown else { return false }
+        tabIsDown = false
+        return true
+    }
+}
 
 private final class SenderCache: @unchecked Sendable {
     private let lock = NSLock()
@@ -70,6 +99,7 @@ private final class SenderCache: @unchecked Sendable {
 }
 
 private let senderCache = SenderCache()
+private let pendingKeyUps = PendingKeyUps()
 
 private final class PointerSource: @unchecked Sendable {
     private let lock = NSLock()
@@ -148,6 +178,13 @@ private func enqueueShortcut(keyCode: CGKeyCode, modifiers: CGEventFlags) {
     }
 }
 
+private func isBrowserFrontmost() -> Bool {
+    guard let bundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+        return false
+    }
+    return browserBundleIdentifiers.contains(bundleIdentifier)
+}
+
 private func callback(
     _ proxy: CGEventTapProxy,
     _ type: CGEventType,
@@ -189,7 +226,6 @@ private func callback(
     guard isReceiver else {
         return Unmanaged.passUnretained(event)
     }
-    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     switch type {
     case .flagsChanged:
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
@@ -209,6 +245,19 @@ private func callback(
 
     case .keyDown, .keyUp:
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        let isMiddleButtonChord = keyCode == 0x30
+            && event.flags.contains(.maskCommand)
+            && event.flags.contains(.maskControl)
+        if type == .keyDown, isMiddleButtonChord, isBrowserFrontmost() {
+            if pendingKeyUps.beginTabPress() {
+                FileHandle.standardError.write(Data("map M560 Control+Command+Tab -> close browser tab\n".utf8))
+                enqueueShortcut(keyCode: 0x0d, modifiers: .maskCommand)
+            }
+            return nil
+        }
+        if type == .keyUp, keyCode == 0x30, pendingKeyUps.consumeTabRelease() {
+            return nil
+        }
         guard keyCode == 0x02, event.flags.contains(.maskCommand) else {
             return Unmanaged.passUnretained(event)
         }
