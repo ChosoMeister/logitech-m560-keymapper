@@ -343,6 +343,16 @@ func mapperCallback(
         return nil
     }
 
+    // Log unattributed events too: if the HID lookup fails the event is not
+    // recognized as the mouse's, and it would otherwise vanish silently.
+    // These come from every device, the real keyboard included, so the key
+    // code is recorded only for the four the wheel chords are built from —
+    // anything else would make this a record of what was typed.
+    if !isReceiver {
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        let isChordKey = [0x3a, 0x3b, 0x37, 0x30].contains(keyCode)
+        logVerbose("unattributed type=\(eventName(type)) key=\(isChordKey ? String(keyCode) : "-") sender=\(sender.map(String.init) ?? "none")")
+    }
     if isReceiver {
         logVerbose("recv type=\(eventName(type)) key=\(event.getIntegerValueField(.keyboardEventKeycode)) flags=\(String(event.flags.rawValue, radix: 16))")
     }
