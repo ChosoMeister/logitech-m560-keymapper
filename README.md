@@ -57,6 +57,44 @@ Anything else mapping this button adds a second action to every press:
   event this helper already posts, not anything from the mouse. Remove that
   mapping; without this helper running it has nothing to act on.
 
+## Install
+
+Download `M560Mapper-<version>.zip` from the
+[releases](https://github.com/ChosoMeister/logitech-m560-keymapper/releases),
+unzip it and move `M560Mapper.app` to `/Applications`.
+
+The app is signed ad-hoc, not with an Apple Developer ID, and is not notarized,
+so macOS quarantines it and refuses the first launch. Open it once from the
+Finder with right-click → Open and confirm, or clear the quarantine flag:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/M560Mapper.app
+```
+
+Then:
+
+1. Open the app. It appears in the menu bar as a mouse glyph.
+2. Grant Accessibility when macOS asks, under System Settings → Privacy &
+   Security → Accessibility. The app retries every two seconds, so it starts
+   working without being relaunched.
+3. Pick your mouse from **Mouse** in the panel. Only that device's buttons are
+   touched; everything else passes through untouched.
+4. Turn on **Launch at login** if you want it to start with macOS.
+
+### Does it work with other mice?
+
+It was written for the Logitech M560 on a Unifying receiver, and that is the
+default selection, but nothing is hardcoded to it. Any mouse whose extra
+buttons arrive as HID++ notifications on a vendor collection should work once
+selected. To see what is attached:
+
+```sh
+/Applications/M560Mapper.app/Contents/MacOS/M560Mapper --devices
+```
+
+A device listed without a vendor collection has no channel for these reports,
+so the middle-click mapping will have nothing to read.
+
 ## Build and run
 
 ```sh

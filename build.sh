@@ -1,7 +1,14 @@
 #!/bin/sh
-# Builds M560Mapper.app, a menu bar agent. Run ./build.sh then open the app.
+# Builds M560Mapper.app, a menu bar agent.
+#
+#   ./build.sh              build in place
+#   ./build.sh --install    build and copy to /Applications
+#   ./build.sh --release    build for distribution and zip it
+#
 set -eu
 cd "$(dirname "$0")"
+
+MODE="${1:-}"
 
 APP="M560Mapper.app"
 MACOS_DIR="$APP/Contents/MacOS"
@@ -35,8 +42,14 @@ swiftc -O \
 # signature that is the binary's cdhash, so every rebuild voided the grant. A
 # self-signed certificate keeps one stable identity across rebuilds instead.
 # Create it once (see README), or the build falls back to ad-hoc.
+# A release is signed ad-hoc: the self-signed certificate exists only on the
+# machine that made it, so a signature from it means nothing to anyone else.
+# Neither is a Developer ID, so a download is quarantined either way and the
+# README says how to open it.
 IDENTITY="M560Mapper Self-Signed"
-if security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
+if [ "$MODE" = "--release" ]; then
+	codesign --force --deep --sign - "$APP"
+elif security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
 	codesign --force --deep --sign "$IDENTITY" "$APP"
 else
 	echo "warning: '$IDENTITY' not found, signing ad-hoc; the Accessibility grant will not survive rebuilds" >&2
@@ -47,8 +60,19 @@ echo "Built $APP"
 
 # A login-item agent belongs in /Applications; the Accessibility grant follows
 # the signing certificate, not the path, so moving it costs nothing.
-if [ "${1:-}" = "--install" ]; then
+if [ "$MODE" = "--install" ]; then
 	rm -rf "/Applications/$APP"
 	cp -R "$APP" /Applications/
 	echo "Installed /Applications/$APP"
+fi
+
+if [ "$MODE" = "--release" ]; then
+	VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")"
+	ARCHIVE="M560Mapper-$VERSION.zip"
+	rm -f "$ARCHIVE"
+	# ditto keeps the bundle's symlinks and extended attributes intact, which
+	# plain zip does not, and a mangled bundle will not launch.
+	ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
+	codesign --verify --deep --strict "$APP"
+	echo "Packaged $ARCHIVE"
 fi

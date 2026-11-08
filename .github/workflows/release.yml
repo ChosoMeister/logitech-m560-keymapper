@@ -1,0 +1,31 @@
+name: Release
+
+# Builds the app and attaches it to the release when a version tag is pushed.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ./build.sh --release
+
+      - name: Verify the bundle launches its command line modes
+        # The runner has no mouse and no Accessibility grant, so this only
+        # proves the bundle is well formed and the binary runs.
+        run: ./M560Mapper.app/Contents/MacOS/M560Mapper --check-permissions
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: M560Mapper-*.zip
+          generate_release_notes: true
