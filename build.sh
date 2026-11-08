@@ -10,6 +10,21 @@ rm -rf "$APP"
 mkdir -p "$MACOS_DIR" "$APP/Contents/Resources"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
+# The icon is generated rather than stored as a binary, so it stays editable.
+ICONSET="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET"
+swiftc -O Tools/make-icon.swift -o "$ICONSET/../make-icon"
+"$ICONSET/../make-icon" "$ICONSET/../icon.png" >/dev/null
+for pixels in 16 32 64 128 256 512 1024; do
+	sips -z "$pixels" "$pixels" "$ICONSET/../icon.png" --out "$ICONSET/icon_${pixels}x${pixels}.png" >/dev/null
+done
+# Retina variants are the same image at double the nominal size.
+for pixels in 16 32 128 256 512; do
+	cp "$ICONSET/icon_$((pixels * 2))x$((pixels * 2)).png" "$ICONSET/icon_${pixels}x${pixels}@2x.png"
+done
+rm -f "$ICONSET/icon_64x64.png" "$ICONSET/icon_1024x1024.png"
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+
 swiftc -O \
 	-framework AppKit -framework SwiftUI -framework CoreGraphics \
 	-framework IOKit -framework CoreFoundation -framework ServiceManagement \

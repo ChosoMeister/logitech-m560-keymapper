@@ -8,6 +8,8 @@
 	<string>M560 Mapper</string>
 	<key>CFBundleExecutable</key>
 	<string>M560Mapper</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.mustafa.m560mapper</string>
 	<key>CFBundleInfoDictionaryVersion</key>
