@@ -1,34 +1,75 @@
 # M560 Mapper
 
-A small macOS-only helper for the Logitech M560 on Unifying receiver `046d:c52b`.
+A macOS menu bar agent for the Logitech M560 on Unifying receiver `046d:c52b`.
 It does not send HID++ commands or change the mouse firmware mode. It filters
-keyboard events by the Logitech receiver's IOKit identity and remaps only the
-M560 side buttons:
+events by the Logitech receiver's IOKit identity and remaps only M560 buttons:
 
-- M560 side button near the wheel (right Command) → Control+Left (previous Space)
-- M560 side button near the palm (Command+D) → Control+Right (next Space)
-- M560 wheel middle button chord → a real middle click at the pointer position
-Wheel tilt left/right are translated to Command+[ / Command+] so apps such as
-Safari and Finder can use their native Back/Forward shortcuts. These tilt
-events can lack a direct HID sender on macOS, so the helper uses the last
-attributed pointer device and fails open when that source was not the M560.
-On the tested M560, the wheel middle button reports Control+Command+Tab instead
-of a mouse-button event. The helper recognizes that exact chord from the Logitech
-receiver, suppresses its modifier/key events, and emits an unmodified middle-click
-event at the current pointer position. The active app receives the same event
-type as a physical middle mouse button, so its own middle-click behavior applies.
+- Wheel button → a real middle mouse button (press, hold, drag and release)
+- Side button near the wheel → Control+Left (previous Space)
+- Side button near the palm → Control+Right (next Space)
+- Wheel tilt left/right → Command+[ / Command+] (Back / Forward)
 
-Build and run from Terminal:
+## Why the wheel button needs translating
+
+On this mouse the wheel button does not report a mouse button at all. Its
+firmware sends the keyboard chord Control+Command+Tab, which is why macOS sees
+a key combination instead of a click. The helper recognizes that exact chord
+coming from the Logitech receiver, suppresses the chord's key and modifier
+events, and emits mouse button 2 events in their place:
+
+- chord pressed → `otherMouseDown`, button 2, click state 1, no modifier flags
+- pointer moves while held → `otherMouseDragged`, so middle-drag and autoscroll work
+- chord released (or Command/Control released) → `otherMouseUp`
+
+The active app receives the same event stream as a physical three-button mouse,
+so its own middle-click behavior applies — closing a tab, opening a link in a
+background tab, pasting the X11 selection, panning in a 3D app, and so on.
+Because the button is held rather than clicked-and-released instantly, gestures
+that depend on holding the middle button work too.
+
+## Build and run
 
 ```sh
-swiftc -framework AppKit -framework CoreGraphics -framework IOKit -framework CoreFoundation main.swift -o M560Mapper
-./M560Mapper
+./build.sh
 ```
 
-macOS may ask for Accessibility and Input Monitoring permission for the app
-that launches it. The helper runs in the foreground; Control-C stops it. It
-does not install a login item or modify system settings.
+```sh
+open M560Mapper.app
+```
 
-This receiver currently has only the M560 paired. If another device is paired
-to this same receiver later, its events may share the receiver identity and
+The build produces `M560Mapper.app`, a background agent with no Dock icon. It
+appears in the menu bar as a mouse glyph. Clicking it opens a Liquid Glass
+panel with:
+
+- a master on/off switch that starts and stops the event tap live
+- individual switches for middle click, Space switching and tilt navigation
+- **Launch at login**, registered through `SMAppService`
+- Quit
+
+macOS asks for Accessibility permission the first time the mapper is enabled.
+Grant it under System Settings → Privacy & Security → Accessibility, then
+toggle the mapper off and on from the panel. The build is ad-hoc signed so the
+permission grant and the login item survive rebuilds.
+
+## Command line modes
+
+```sh
+./M560Mapper.app/Contents/MacOS/M560Mapper --diagnose
+```
+
+```sh
+./M560Mapper.app/Contents/MacOS/M560Mapper --headless --trace
+```
+
+`--diagnose` prints every eligible event read-only without remapping anything,
+which is how the wheel chord above was identified. `--headless` runs the mapper
+with no menu bar item. `--check-permissions` prints the Accessibility status
+and exits.
+
+## Notes
+
+Wheel tilt events can lack a direct HID sender on macOS, so the helper uses the
+last attributed pointer device and fails open when that source was not the
+M560. This receiver currently has only the M560 paired; if another device is
+paired to the same receiver later, its events share the receiver identity and
 should be checked before using this helper in that configuration.
