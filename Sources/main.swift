@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(rootView: PanelView(settings: settings))
 
         settings.applyRunState()
+        startPermissionWatchdog()
         if settings.enabled, settings.permissionDenied {
             settings.requestAccessibilityPermission()
         }
@@ -39,6 +40,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshStatusIcon() }
         }
+    }
+
+    /// Granting Accessibility does not restart the app, and the tap is only
+    /// attempted once at launch, so without this the app sits dead until the
+    /// user quits and reopens it. Retry quietly while permission is missing.
+    private func startPermissionWatchdog() {
+        let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                let settings = Settings.shared
+                guard settings.enabled, !EventMapper.shared.isRunning else { return }
+                settings.applyRunState()
+                if EventMapper.shared.isRunning {
+                    self.refreshStatusIcon()
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

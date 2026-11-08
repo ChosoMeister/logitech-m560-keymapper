@@ -136,13 +136,27 @@ private final class MiddleButtonState: @unchecked Sendable {
     private let lock = NSLock()
     private var isDown = false
 
+    private var lastPressAt: CFAbsoluteTime = 0
+
     /// Returns true when this is a fresh press (not an auto-repeat).
     func press() -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard !isDown else { return false }
         isDown = true
+        lastPressAt = CFAbsoluteTimeGetCurrent()
         return true
+    }
+
+    /// One physical press of the wheel button emits both chords in sequence:
+    /// the modifier pair first, then Control+Command+Tab a few hundred
+    /// milliseconds later. Without this the second chord clicks again, which
+    /// closed two browser tabs per press. The Tab path stays live for presses
+    /// that arrive on their own, which the capture also showed happening.
+    func firedRecently(within interval: CFAbsoluteTime) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return CFAbsoluteTimeGetCurrent() - lastPressAt < interval
     }
 
     /// Returns true when a press was outstanding and is now released.
@@ -373,6 +387,7 @@ func mapperCallback(
             // Releasing Command ends a wheel-button hold even if the Tab key up
             // is swallowed elsewhere, so the synthetic button never sticks down.
             if !commandIsDown, MiddleButtonState.shared.release() {
+                log("map command release -> middle button up")
                 enqueueMiddleButton(down: false)
             }
             return nil
@@ -393,6 +408,9 @@ func mapperCallback(
             && event.flags.contains(.maskCommand)
             && event.flags.contains(.maskControl)
         if options.middleClick, type == .keyDown, isMiddleButtonChord {
+            if MiddleButtonState.shared.firedRecently(within: 1.0) {
+                return nil
+            }
             if MiddleButtonState.shared.press() {
                 log("map wheel chord -> middle button down")
                 enqueueMiddleButton(down: true)
