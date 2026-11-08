@@ -223,15 +223,6 @@ private func postMiddleButton(down: Bool) {
     event.post(tap: .cghidEventTap)
 }
 
-/// The wheel button's chord is momentary: the capture showed press and
-/// release 8ms apart whether the button is tapped or held down. A held
-/// synthetic button therefore had no way to learn it should let go, and when
-/// a release edge was missed it stayed down until the next press, landing on
-/// whatever was under the pointer seconds later. So emit one complete click.
-func enqueueMiddleButton(down: Bool) {
-    injectionQueue.async { postMiddleButton(down: down) }
-}
-
 /// Forwards pointer motion as a middle-button drag while the wheel button is
 /// held, which is possible now the HID++ edges say when it is held.
 private func postMiddleDrag(at location: CGPoint) {

@@ -231,6 +231,9 @@ enum WheelButtonMonitor {
     static let controlID: UInt16 = 0x00af
     private static let featureIndex: UInt8 = 0x0a
 
+    /// The manager must outlive start(): releasing it closes the device, and
+    /// the callback then never fires again.
+    nonisolated(unsafe) private static var manager: IOHIDManager?
     nonisolated(unsafe) private static var device: IOHIDDevice?
     nonisolated(unsafe) private static var buffer: UnsafeMutablePointer<UInt8>?
     nonisolated(unsafe) private static var thread: Thread?
@@ -239,13 +242,14 @@ enum WheelButtonMonitor {
 
     static func start() -> Bool {
         guard !isRunning else { return true }
-        let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        IOHIDManagerSetDeviceMatching(manager, [
+        let hidManager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        manager = hidManager
+        IOHIDManagerSetDeviceMatching(hidManager, [
             kIOHIDVendorIDKey: Int(targetVendorID),
             kIOHIDProductIDKey: Int(targetReceiverProductID),
         ] as CFDictionary)
-        guard IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess,
-              let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>,
+        guard IOHIDManagerOpen(hidManager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess,
+              let devices = IOHIDManagerCopyDevices(hidManager) as? Set<IOHIDDevice>,
               let collection = devices.first(where: { device in
                   (IOHIDDeviceGetProperty(device, kIOHIDPrimaryUsagePageKey as CFString) as? NSNumber)?
                       .intValue == 0xFF00

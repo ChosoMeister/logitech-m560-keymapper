@@ -9,51 +9,53 @@ events by the Logitech receiver's IOKit identity and remaps only M560 buttons:
 - Side button near the palm → Control+Right (next Space)
 - Wheel tilt left/right → Command+[ / Command+] (Back / Forward)
 
-## Why the wheel button needs translating
+## How the wheel button is read
 
-On this mouse the wheel button does not report a mouse button at all. Its
-firmware sends a keyboard chord, which is why macOS sees a key combination
-instead of a click. Captures showed it uses two, and uses them erratically:
+The wheel button does not report as a mouse button through the normal HID
+path, and its firmware also emits keyboard chords — left Option with left
+Command, and Control+Command+Tab — which is why macOS saw key combinations
+instead of a click.
 
-- left Option and left Command pressed together, with no key event at all
-- Control+Command+Tab
+Mapping those chords does not work. Captures showed the firmware sending one
+chord, the other, or both, and dropping them entirely on half of all presses,
+with nothing marking the button as held.
 
-Neither is an edge of the button. Some presses send only the first, some only
-the second, and some send both with the second 320-480ms behind. Each one is
-suppressed and emits a complete middle click — `otherMouseDown` then
-`otherMouseUp` 20ms later, button 2, click state 1, no modifier flags — and a
-500ms window collapses the presses that send both.
+The button does report itself reliably somewhere else: the receiver's vendor
+collection, as a HID++ notification.
 
-The active app receives what a physical three-button mouse sends, so its own
-middle-click behavior applies: closing a tab, opening a link in a background
-tab, panning in a 3D app.
+    11 01 0a 00 00 af     long report 0x11, device 1, feature index 0x0a,
+                          control id 0x00af — button down
+    11 01 0a 00 00 00     all diverted buttons up
 
-### What this cannot do
+Four presses gave four clean pairs where the chords gave two. So the helper
+reads those reports directly and posts mouse button 2 — `otherMouseDown`,
+`otherMouseUp`, and `otherMouseDragged` while held, with click state 1 and no
+modifier flags. The edges are real, so holding and middle-dragging work. The
+keyboard chords are still suppressed, otherwise Control+Command+Tab would
+reach the system as a shortcut.
 
-Deliberate taps land 540ms or more apart and paired chords 320-480ms apart.
-Those ranges nearly touch, so a very fast double tap can be read as a single
-press. Holding is worse: the firmware sends nothing that marks the button as
-still down, so a hold cannot be told from a tap, and middle-drag is not
-available.
+Only reading is needed. Writing to that collection — which is what diverting a
+button normally requires — is refused by macOS with `0xe0005000`, from a shell
+and from a signed bundle alike. Logitech's agent carries
+`com.apple.developer.hid.virtual.device`, a restricted entitlement only Apple
+grants, which a self-signed certificate cannot hold. This button already
+reports this way, so no write is necessary.
 
-The clean fix is HID++: ask the device over the receiver's vendor collection
-to divert the wheel button, so it reports a raw notification with real press
-and release edges instead of a keyboard chord. That is not possible here.
-macOS refuses output reports to that collection (`0xe0005000`) from an
-ordinary app, whatever the signature; Logitech's own agent carries
-`com.apple.developer.hid.virtual.device`, a restricted entitlement that only
-Apple can grant and that a self-signed certificate cannot hold.
+### Other software on the same mouse
 
-### Logi Options+
+Anything else mapping this button adds a second action to every press:
 
-If Logi Options+ is running it maps the same wheel press independently, which
-closes a second tab a moment after this helper's click. Quit it, or clear its
-mapping for that button. Quitting from its menu bar icon is not enough,
-because launchd restarts it:
+- **Logi Options+** maps it independently, which closed a second browser tab a
+  moment after this helper's click. Quitting from its menu bar icon is not
+  enough, because launchd restarts it:
 
-```sh
-launchctl bootout gui/$(id -u)/com.logi.cp-dev-mgr
-```
+  ```sh
+  launchctl bootout gui/$(id -u)/com.logi.cp-dev-mgr
+  ```
+
+- **LinearMouse** configured with `button 2 → middle click` is mapping the
+  event this helper already posts, not anything from the mouse. Remove that
+  mapping; without this helper running it has nothing to act on.
 
 ## Build and run
 
