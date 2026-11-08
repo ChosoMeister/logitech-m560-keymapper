@@ -130,46 +130,26 @@ final class MapperOptions: @unchecked Sendable {
     }
 }
 
-/// Tracks the synthetic middle-button state so a held wheel button stays held.
+/// One physical press of the wheel button emits two chords in sequence: the
+/// Option+Command pair, then Control+Command+Tab a few hundred milliseconds
+/// behind it. Both must map to a single click, so the second one inside this
+/// window is dropped. There is no held state to track: the chord is momentary
+/// even when the button is held, so every press is one complete click.
 private final class MiddleButtonState: @unchecked Sendable {
     static let shared = MiddleButtonState()
+    private static let window: CFAbsoluteTime = 1.0
+
     private let lock = NSLock()
-    private var isDown = false
+    private var lastFiredAt: CFAbsoluteTime = 0
 
-    private var lastPressAt: CFAbsoluteTime = 0
-
-    /// Returns true when this is a fresh press (not an auto-repeat).
-    func press() -> Bool {
+    /// Returns true when a click should be emitted for this chord.
+    func fire() -> Bool {
+        let now = CFAbsoluteTimeGetCurrent()
         lock.lock()
         defer { lock.unlock() }
-        guard !isDown else { return false }
-        isDown = true
-        lastPressAt = CFAbsoluteTimeGetCurrent()
+        guard now - lastFiredAt >= Self.window else { return false }
+        lastFiredAt = now
         return true
-    }
-
-    /// One physical press of the wheel button emits both chords in sequence:
-    /// the modifier pair first, then Control+Command+Tab a few hundred
-    /// milliseconds later. Without this the second chord clicks again, which
-    /// closed two browser tabs per press. The Tab path stays live for presses
-    /// that arrive on their own, which the capture also showed happening.
-    func firedRecently(within interval: CFAbsoluteTime) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return CFAbsoluteTimeGetCurrent() - lastPressAt < interval
-    }
-
-    /// Returns true when a press was outstanding and is now released.
-    func release() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard isDown else { return false }
-        isDown = false
-        return true
-    }
-
-    var held: Bool {
-        lock.lock(); defer { lock.unlock() }; return isDown
     }
 }
 
@@ -266,25 +246,17 @@ private func postMiddleButton(down: Bool) {
     event.post(tap: .cghidEventTap)
 }
 
-func enqueueMiddleButton(down: Bool) {
-    injectionQueue.async { postMiddleButton(down: down) }
-}
-
-/// Forwards pointer motion as a middle-button drag while the wheel button is
-/// held, so drag gestures and autoscroll behave like a real middle button.
-private func postMiddleDrag(at location: CGPoint) {
-    guard let source = CGEventSource(stateID: .hidSystemState),
-          let event = CGEvent(
-              mouseEventSource: source,
-              mouseType: .otherMouseDragged,
-              mouseCursorPosition: location,
-              mouseButton: .center
-          )
-    else { return }
-    event.flags = []
-    event.setIntegerValueField(.mouseEventButtonNumber, value: 2)
-    event.setIntegerValueField(.eventSourceUserData, value: injectedEventMarker)
-    event.post(tap: .cghidEventTap)
+/// The wheel button's chord is momentary: the capture showed press and
+/// release 8ms apart whether the button is tapped or held down. A held
+/// synthetic button therefore had no way to learn it should let go, and when
+/// a release edge was missed it stayed down until the next press, landing on
+/// whatever was under the pointer seconds later. So emit one complete click.
+func enqueueMiddleClick() {
+    injectionQueue.async {
+        postMiddleButton(down: true)
+        usleep(20_000)
+        postMiddleButton(down: false)
+    }
 }
 
 // MARK: - Tap callback
@@ -313,10 +285,6 @@ func mapperCallback(
         // instead of on every move; it only feeds the wheel-tilt fallback.
         if PointerSource.shared.shouldResample() {
             pointerSourceUpdate(event)
-        }
-        if MiddleButtonState.shared.held, type == .mouseMoved {
-            injectionQueue.async { postMiddleDrag(at: event.location) }
-            return nil
         }
         return Unmanaged.passUnretained(event)
     }
@@ -366,17 +334,11 @@ func mapperCallback(
         // right Command and Command+D instead. Treat the pair going down as
         // the button going down, and either modifier lifting as its release.
         if options.middleClick, keyCode == 0x3a || keyCode == 0x37 {
-            let optionIsDown = event.flags.contains(.maskAlternate)
-            if optionIsDown, commandIsDown {
-                if MiddleButtonState.shared.press() {
-                    log("map wheel chord (option+command) -> middle button down")
-                    enqueueMiddleButton(down: true)
+            if event.flags.contains(.maskAlternate), commandIsDown {
+                if MiddleButtonState.shared.fire() {
+                    log("map wheel chord (option+command) -> middle click")
+                    enqueueMiddleClick()
                 }
-                return nil
-            }
-            if !event.flags.contains(.maskControl), MiddleButtonState.shared.release() {
-                log("map wheel chord release -> middle button up")
-                enqueueMiddleButton(down: false)
                 return nil
             }
         }
@@ -385,20 +347,11 @@ func mapperCallback(
             guard options.spaceSwitching || options.middleClick else {
                 return Unmanaged.passUnretained(event)
             }
-            // Releasing Command ends a wheel-button hold even if the Tab key up
-            // is swallowed elsewhere, so the synthetic button never sticks down.
-            if !commandIsDown, MiddleButtonState.shared.release() {
-                log("map command release -> middle button up")
-                enqueueMiddleButton(down: false)
-            }
             return nil
         }
         // The wheel click chord also carries left Option and left Control.
         if keyCode == 0x3a || keyCode == 0x3b {
             guard options.middleClick else { return Unmanaged.passUnretained(event) }
-            if !event.flags.contains(.maskControl), MiddleButtonState.shared.release() {
-                enqueueMiddleButton(down: false)
-            }
             return nil
         }
         return Unmanaged.passUnretained(event)
@@ -409,20 +362,13 @@ func mapperCallback(
             && event.flags.contains(.maskCommand)
             && event.flags.contains(.maskControl)
         if options.middleClick, type == .keyDown, isMiddleButtonChord {
-            if MiddleButtonState.shared.firedRecently(within: 1.0) {
-                return nil
-            }
-            if MiddleButtonState.shared.press() {
-                log("map wheel chord -> middle button down")
-                enqueueMiddleButton(down: true)
+            if MiddleButtonState.shared.fire() {
+                log("map wheel chord (control+command+tab) -> middle click")
+                enqueueMiddleClick()
             }
             return nil
         }
         if options.middleClick, type == .keyUp, keyCode == 0x30 {
-            if MiddleButtonState.shared.release() {
-                log("map wheel chord -> middle button up")
-                enqueueMiddleButton(down: false)
-            }
             return nil
         }
         guard options.spaceSwitching, keyCode == 0x02, event.flags.contains(.maskCommand) else {
@@ -526,7 +472,6 @@ final class EventMapper {
 
     func stop() {
         guard isRunning, let tapRunLoop, let tap else { return }
-        if MiddleButtonState.shared.release() { enqueueMiddleButton(down: false) }
         CGEvent.tapEnable(tap: tap, enable: false)
         CFRunLoopStop(tapRunLoop)
         tapThread = nil
