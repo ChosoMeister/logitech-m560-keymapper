@@ -24,7 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover = NSPopover()
         popover.behavior = .transient
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: PanelView(settings: settings))
+        let panel = NSHostingController(rootView: PanelView(settings: settings))
+        // Without this the popover keeps whatever size it first measured, so
+        // the panel overflowed its frame and the header was clipped off the
+        // top of the screen once the device picker made the content taller.
+        panel.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = panel
 
         settings.applyRunState()
         startPermissionWatchdog()
@@ -76,6 +81,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             popover.performClose(sender)
         } else {
             NSApp.activate(ignoringOtherApps: true)
+            // Re-measure before showing: the device list can change between
+            // openings, which changes the panel's height.
+            if let panel = popover.contentViewController {
+                popover.contentSize = panel.view.fittingSize
+            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
         }
     }
