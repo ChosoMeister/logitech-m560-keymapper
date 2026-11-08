@@ -91,6 +91,12 @@ if arguments.contains("--check-permissions") {
     exit(0)
 }
 
+if arguments.contains("--hidpp") {
+    MapperOptions.shared.trace = true
+    HIDPlusPlus.probe()
+    exit(0)
+}
+
 if arguments.contains("--diagnose") || arguments.contains("--headless") {
     EventMapper.shared.diagnoseOnly = arguments.contains("--diagnose")
     // --diagnose exists to dump raw events, so it implies tracing.

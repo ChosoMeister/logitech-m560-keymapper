@@ -142,7 +142,11 @@ final class MapperOptions: @unchecked Sendable {
 /// that case cannot be told apart from two quick presses.
 private final class MiddleButtonState: @unchecked Sendable {
     static let shared = MiddleButtonState()
-    private static let window: CFAbsoluteTime = 0.8
+    // Paired chords land 320-480ms apart, deliberate taps 540ms or more, so
+    // this sits in the gap between them. The two ranges nearly touch, which is
+    // the real limit of reading this button through its keyboard chords: a
+    // very fast double tap can still be read as one press.
+    private static let window: CFAbsoluteTime = 0.5
 
     private let lock = NSLock()
     private var lastFiredAt: CFAbsoluteTime = 0

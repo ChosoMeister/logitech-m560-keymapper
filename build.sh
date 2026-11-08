@@ -13,7 +13,7 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 swiftc -O \
 	-framework AppKit -framework SwiftUI -framework CoreGraphics \
 	-framework IOKit -framework CoreFoundation -framework ServiceManagement \
-	Sources/Logging.swift Sources/EventMapper.swift Sources/Settings.swift Sources/PanelView.swift Sources/main.swift \
+	Sources/Logging.swift Sources/HIDPlusPlus.swift Sources/EventMapper.swift Sources/Settings.swift Sources/PanelView.swift Sources/main.swift \
 	-o "$MACOS_DIR/M560Mapper"
 
 # TCC binds an Accessibility grant to the signing identity. With an ad-hoc

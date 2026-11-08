@@ -13,23 +13,47 @@ events by the Logitech receiver's IOKit identity and remaps only M560 buttons:
 
 On this mouse the wheel button does not report a mouse button at all. Its
 firmware sends a keyboard chord, which is why macOS sees a key combination
-instead of a click. A read-only capture showed it uses two of them:
+instead of a click. Captures showed it uses two, and uses them erratically:
 
 - left Option and left Command pressed together, with no key event at all
 - Control+Command+Tab
 
-The helper recognizes both coming from the Logitech receiver, suppresses their
-key and modifier events, and emits mouse button 2 events in their place:
+Neither is an edge of the button. Some presses send only the first, some only
+the second, and some send both with the second 320-480ms behind. Each one is
+suppressed and emits a complete middle click — `otherMouseDown` then
+`otherMouseUp` 20ms later, button 2, click state 1, no modifier flags — and a
+500ms window collapses the presses that send both.
 
-- chord pressed → `otherMouseDown`, button 2, click state 1, no modifier flags
-- pointer moves while held → `otherMouseDragged`, so middle-drag and autoscroll work
-- chord released (or Command/Control released) → `otherMouseUp`
+The active app receives what a physical three-button mouse sends, so its own
+middle-click behavior applies: closing a tab, opening a link in a background
+tab, panning in a 3D app.
 
-The active app receives the same event stream as a physical three-button mouse,
-so its own middle-click behavior applies — closing a tab, opening a link in a
-background tab, pasting the X11 selection, panning in a 3D app, and so on.
-Because the button is held rather than clicked-and-released instantly, gestures
-that depend on holding the middle button work too.
+### What this cannot do
+
+Deliberate taps land 540ms or more apart and paired chords 320-480ms apart.
+Those ranges nearly touch, so a very fast double tap can be read as a single
+press. Holding is worse: the firmware sends nothing that marks the button as
+still down, so a hold cannot be told from a tap, and middle-drag is not
+available.
+
+The clean fix is HID++: ask the device over the receiver's vendor collection
+to divert the wheel button, so it reports a raw notification with real press
+and release edges instead of a keyboard chord. That is not possible here.
+macOS refuses output reports to that collection (`0xe0005000`) from an
+ordinary app, whatever the signature; Logitech's own agent carries
+`com.apple.developer.hid.virtual.device`, a restricted entitlement that only
+Apple can grant and that a self-signed certificate cannot hold.
+
+### Logi Options+
+
+If Logi Options+ is running it maps the same wheel press independently, which
+closes a second tab a moment after this helper's click. Quit it, or clear its
+mapping for that button. Quitting from its menu bar icon is not enough,
+because launchd restarts it:
+
+```sh
+launchctl bootout gui/$(id -u)/com.logi.cp-dev-mgr
+```
 
 ## Build and run
 
