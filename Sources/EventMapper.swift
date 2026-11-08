@@ -240,12 +240,9 @@ private func postMiddleDrag(at location: CGPoint) {
     event.post(tap: .cghidEventTap)
 }
 
-func enqueueMiddleClick() {
-    injectionQueue.async {
-        postMiddleButton(down: true)
-        usleep(20_000)
-        postMiddleButton(down: false)
-    }
+/// Posts one edge of the synthetic middle button, off the callback thread.
+func enqueueMiddleButton(down: Bool) {
+    injectionQueue.async { postMiddleButton(down: down) }
 }
 
 // MARK: - Tap callback
