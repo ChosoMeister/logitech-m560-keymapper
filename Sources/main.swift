@@ -75,7 +75,8 @@ if arguments.contains("--check-permissions") {
 
 if arguments.contains("--diagnose") || arguments.contains("--headless") {
     EventMapper.shared.diagnoseOnly = arguments.contains("--diagnose")
-    MapperOptions.shared.trace = arguments.contains("--trace")
+    // --diagnose exists to dump raw events, so it implies tracing.
+    MapperOptions.shared.trace = true
     guard EventMapper.shared.start() else {
         fputs("Could not create the input event tap. Grant Accessibility/Input Monitoring access and run it again.\n", stderr)
         exit(2)
@@ -92,7 +93,10 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     app.setActivationPolicy(.accessory)
+    // Tracing can also be switched on without rebuilding:
+    //   defaults write com.mustafa.m560mapper trace -bool YES
     MapperOptions.shared.trace = arguments.contains("--trace")
+        || UserDefaults.standard.bool(forKey: "trace")
     // The delegate must outlive this scope; NSApplication holds it weakly.
     appDelegate = delegate
     app.run()

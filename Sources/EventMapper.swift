@@ -180,9 +180,18 @@ func senderID(for event: CGEvent) -> UInt64? {
     return hidEventSenderID(hidEvent.toOpaque())
 }
 
+/// Mapping decisions and lifecycle. Carries no key information.
 private func log(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
     trace(message)
+}
+
+/// Raw event detail, including key codes. Recorded only while tracing is on.
+private func logVerbose(_ message: @autoclosure () -> String) {
+    guard MapperOptions.shared.trace else { return }
+    let text = message()
+    FileHandle.standardError.write(Data((text + "\n").utf8))
+    traceVerbose(text)
 }
 
 private func postShortcut(keyCode: CGKeyCode, modifiers: CGEventFlags) {
@@ -303,16 +312,14 @@ func mapperCallback(
     if EventMapper.shared.diagnoseOnly {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let button = event.getIntegerValueField(.mouseEventButtonNumber)
-        log("diag type=\(eventName(type)) key=\(keyCode) button=\(button) flags=\(event.flags.rawValue) sender=\(sender.map(String.init) ?? "none") receiver=\(isReceiver)")
+        logVerbose("diag type=\(eventName(type)) key=\(keyCode) button=\(button) flags=\(event.flags.rawValue) sender=\(sender.map(String.init) ?? "none") receiver=\(isReceiver)")
         return Unmanaged.passUnretained(event)
     }
 
     if type == .otherMouseDown || type == .otherMouseUp {
         let button = event.getIntegerValueField(.mouseEventButtonNumber)
         let attributedToM560 = sender.map(SenderCache.shared.isM560Receiver) ?? PointerSource.shared.isM560Fallback()
-        if options.trace {
-            log("tilt type=\(eventName(type)) button=\(button) sender=\(sender.map(String.init) ?? "none") fallback_m560=\(PointerSource.shared.isM560Fallback()) target=\(attributedToM560)")
-        }
+        logVerbose("tilt type=\(eventName(type)) button=\(button) sender=\(sender.map(String.init) ?? "none") fallback_m560=\(PointerSource.shared.isM560Fallback()) target=\(attributedToM560)")
         guard options.tiltNavigation, attributedToM560, button == 3 || button == 4 else {
             return Unmanaged.passUnretained(event)
         }
@@ -323,8 +330,7 @@ func mapperCallback(
     }
 
     if isReceiver {
-        // M560 button traffic only: a few events per press, not a hot path.
-        log("recv type=\(eventName(type)) key=\(event.getIntegerValueField(.keyboardEventKeycode)) flags=\(String(event.flags.rawValue, radix: 16))")
+        logVerbose("recv type=\(eventName(type)) key=\(event.getIntegerValueField(.keyboardEventKeycode)) flags=\(String(event.flags.rawValue, radix: 16))")
     }
 
     guard isReceiver else { return Unmanaged.passUnretained(event) }
