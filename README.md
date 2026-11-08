@@ -12,10 +12,14 @@ events by the Logitech receiver's IOKit identity and remaps only M560 buttons:
 ## Why the wheel button needs translating
 
 On this mouse the wheel button does not report a mouse button at all. Its
-firmware sends the keyboard chord Control+Command+Tab, which is why macOS sees
-a key combination instead of a click. The helper recognizes that exact chord
-coming from the Logitech receiver, suppresses the chord's key and modifier
-events, and emits mouse button 2 events in their place:
+firmware sends a keyboard chord, which is why macOS sees a key combination
+instead of a click. A read-only capture showed it uses two of them:
+
+- left Option and left Command pressed together, with no key event at all
+- Control+Command+Tab
+
+The helper recognizes both coming from the Logitech receiver, suppresses their
+key and modifier events, and emits mouse button 2 events in their place:
 
 - chord pressed → `otherMouseDown`, button 2, click state 1, no modifier flags
 - pointer moves while held → `otherMouseDragged`, so middle-drag and autoscroll work
@@ -47,9 +51,26 @@ panel with:
 - Quit
 
 macOS asks for Accessibility permission the first time the mapper is enabled.
-Grant it under System Settings → Privacy & Security → Accessibility, then
-toggle the mapper off and on from the panel. The build is ad-hoc signed so the
-permission grant and the login item survive rebuilds.
+Grant it under System Settings → Privacy & Security → Accessibility.
+
+The build is ad-hoc signed, and TCC binds an ad-hoc grant to the binary's
+cdhash, so **every rebuild voids the Accessibility grant**. After rebuilding,
+remove the old M560Mapper entry with `−` and let the app's own prompt register
+the new binary; re-ticking the stale entry grants nothing. The app only tries
+to create its tap at launch, so quit and reopen it once the grant is in place.
+
+## Log
+
+The app writes `~/Library/Logs/M560Mapper.log`, created `0600` and truncated
+past 256KB. It records the tap's lifecycle and each mapping decision, none of
+which carries key information.
+
+The tap sees every key the machine types, so raw per-event detail, including
+key codes, is written only when tracing is switched on explicitly:
+
+```sh
+defaults write com.mustafa.m560mapper trace -bool YES
+```
 
 ## Command line modes
 
