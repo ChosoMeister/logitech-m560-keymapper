@@ -57,8 +57,8 @@ enum HIDPlusPlus {
     static func listen(seconds: TimeInterval) {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         IOHIDManagerSetDeviceMatching(manager, [
-            kIOHIDVendorIDKey: Int(targetVendorID),
-            kIOHIDProductIDKey: Int(targetReceiverProductID),
+            kIOHIDVendorIDKey: Int(MapperOptions.shared.vendorID),
+            kIOHIDProductIDKey: Int(MapperOptions.shared.productID),
         ] as CFDictionary)
         guard IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess,
               let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>
@@ -93,8 +93,8 @@ enum HIDPlusPlus {
     static func probe() {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         IOHIDManagerSetDeviceMatching(manager, [
-            kIOHIDVendorIDKey: Int(targetVendorID),
-            kIOHIDProductIDKey: Int(targetReceiverProductID),
+            kIOHIDVendorIDKey: Int(MapperOptions.shared.vendorID),
+            kIOHIDProductIDKey: Int(MapperOptions.shared.productID),
         ] as CFDictionary)
 
         guard IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess,
@@ -228,25 +228,42 @@ enum HIDPlusPlus {
 /// Only reading is needed, which macOS allows; the write that would be needed
 /// to divert a button is refused, but this button already reports this way.
 enum WheelButtonMonitor {
-    static let controlID: UInt16 = 0x00af
-    private static let featureIndex: UInt8 = 0x0a
-
     /// The manager must outlive start(): releasing it closes the device, and
     /// the callback then never fires again.
     nonisolated(unsafe) private static var manager: IOHIDManager?
     nonisolated(unsafe) private static var device: IOHIDDevice?
     nonisolated(unsafe) private static var buffer: UnsafeMutablePointer<UInt8>?
     nonisolated(unsafe) private static var thread: Thread?
+    nonisolated(unsafe) private static var runLoop: CFRunLoop?
 
     private(set) nonisolated(unsafe) static var isRunning = false
+
+    static func stop() {
+        guard isRunning else { return }
+        if let device { IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone)) }
+        if let runLoop { CFRunLoopStop(runLoop) }
+        device = nil
+        runLoop = nil
+        manager = nil
+        thread = nil
+        isRunning = false
+        if WheelButton.shared.release() { enqueueMiddleButton(down: false) }
+    }
+
+    /// Called when the selected device changes: the monitor is bound to one
+    /// device's collection, so it has to be rebuilt rather than retargeted.
+    static func restart() {
+        stop()
+        _ = start()
+    }
 
     static func start() -> Bool {
         guard !isRunning else { return true }
         let hidManager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         manager = hidManager
         IOHIDManagerSetDeviceMatching(hidManager, [
-            kIOHIDVendorIDKey: Int(targetVendorID),
-            kIOHIDProductIDKey: Int(targetReceiverProductID),
+            kIOHIDVendorIDKey: Int(MapperOptions.shared.vendorID),
+            kIOHIDProductIDKey: Int(MapperOptions.shared.productID),
         ] as CFDictionary)
         guard IOHIDManagerOpen(hidManager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess,
               let devices = IOHIDManagerCopyDevices(hidManager) as? Set<IOHIDDevice>,
@@ -269,6 +286,7 @@ enum WheelButtonMonitor {
         let worker = Thread {
             IOHIDDeviceRegisterInputReportCallback(collection, storage, size, wheelReportSeen, nil)
             IOHIDDeviceScheduleWithRunLoop(collection, CFRunLoopGetCurrent(), CFRunLoopMode.commonModes.rawValue)
+            runLoop = CFRunLoopGetCurrent()
             isRunning = true
             ready.signal()
             CFRunLoopRun()
@@ -295,16 +313,22 @@ private func wheelReportSeen(
 ) {
     guard length >= 6 else { return }
     let data = UnsafeBufferPointer(start: bytes, count: length)
-    guard data[0] == 0x11, data[2] == 0x0a, data[3] == 0x00 else { return }
+    // A diverted-button notification: long report, event function 0, a control
+    // id in the next two bytes and nothing after it. Other HID++ notifications
+    // on the same channel, such as battery reports, carry further payload, so
+    // requiring the tail to be empty keeps them out without hardcoding one
+    // device's feature index.
+    guard data[0] == 0x11, data[3] == 0x00 else { return }
+    guard data.count <= 6 || data[6...].allSatisfy({ $0 == 0 }) else { return }
     let control = UInt16(data[4]) << 8 | UInt16(data[5])
 
     guard MapperOptions.shared.middleClick else { return }
-    if control == WheelButtonMonitor.controlID {
+    if control != 0 {
         if WheelButton.shared.press() {
-            trace("wheel button down (hid++ control 0x00af)")
+            trace(String(format: "wheel button down (hid++ control 0x%04x)", control))
             enqueueMiddleButton(down: true)
         }
-    } else if control == 0 {
+    } else {
         if WheelButton.shared.release() {
             trace("wheel button up (hid++)")
             enqueueMiddleButton(down: false)

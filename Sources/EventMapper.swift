@@ -12,8 +12,11 @@ func copyIOHIDEvent(_ event: UnsafeRawPointer) -> Unmanaged<CFTypeRef>?
 @_silgen_name("IOHIDEventGetSenderID")
 func hidEventSenderID(_ event: IOHIDEventRef) -> UInt64
 
-let targetVendorID: Int64 = 0x046d
-let targetReceiverProductID: Int64 = 0xc52b
+/// The device the helper acts on. The Logitech Unifying receiver this was
+/// written against is the default, but it is a setting: any mouse whose extra
+/// buttons arrive this way can be selected instead.
+let defaultVendorID: Int64 = 0x046d
+let defaultProductID: Int64 = 0xc52b
 let injectedEventMarker: Int64 = 0x4d353630
 private let registrySearchParents: UInt32 = 2
 private let registrySearchRecursive: UInt32 = 1
@@ -25,6 +28,11 @@ final class SenderCache: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [UInt64: Bool] = [:]
 
+    /// Senders were classified against the previously selected device.
+    func forget() {
+        lock.lock(); entries.removeAll(); lock.unlock()
+    }
+
     func isM560Receiver(_ senderID: UInt64) -> Bool {
         lock.lock()
         if let cached = entries[senderID] {
@@ -34,7 +42,8 @@ final class SenderCache: @unchecked Sendable {
         lock.unlock()
 
         let matches = readIdentity(senderID).map {
-            $0.vendor == targetVendorID && $0.product == targetReceiverProductID
+            $0.vendor == MapperOptions.shared.vendorID
+                && $0.product == MapperOptions.shared.productID
         } ?? false
 
         lock.lock()
@@ -111,6 +120,8 @@ final class MapperOptions: @unchecked Sendable {
     private var _spaceSwitching = true
     private var _tiltNavigation = true
     private var _trace = false
+    private var _vendorID = defaultVendorID
+    private var _productID = defaultProductID
 
     var middleClick: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _middleClick }
@@ -127,6 +138,14 @@ final class MapperOptions: @unchecked Sendable {
     var trace: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _trace }
         set { lock.lock(); _trace = newValue; lock.unlock() }
+    }
+    var vendorID: Int64 {
+        get { lock.lock(); defer { lock.unlock() }; return _vendorID }
+        set { lock.lock(); _vendorID = newValue; lock.unlock() }
+    }
+    var productID: Int64 {
+        get { lock.lock(); defer { lock.unlock() }; return _productID }
+        set { lock.lock(); _productID = newValue; lock.unlock() }
     }
 }
 

@@ -19,7 +19,9 @@ final class Settings: ObservableObject {
     @Published var middleClick: Bool {
         didSet {
             defaults.set(middleClick, forKey: "middleClick")
-            MapperOptions.shared.middleClick = middleClick
+            devices = DeviceCatalog.connected()
+        applyDevice(restartMonitor: false)
+        MapperOptions.shared.middleClick = middleClick
         }
     }
     @Published var spaceSwitching: Bool {
@@ -40,6 +42,17 @@ final class Settings: ObservableObject {
     /// Set when the tap could not be created, i.e. permission is missing.
     @Published var permissionDenied = false
 
+    /// The mouse being acted on, as "vvvv:pppp". Everything the helper does is
+    /// filtered to this device, so it can be pointed at mice other than the
+    /// M560 it was written for.
+    @Published var deviceID: String {
+        didSet {
+            defaults.set(deviceID, forKey: "deviceID")
+            applyDevice()
+        }
+    }
+    @Published var devices: [PointingDevice] = []
+
     private init() {
         defaults.register(defaults: [
             "enabled": true,
@@ -51,12 +64,37 @@ final class Settings: ObservableObject {
         middleClick = defaults.bool(forKey: "middleClick")
         spaceSwitching = defaults.bool(forKey: "spaceSwitching")
         tiltNavigation = defaults.bool(forKey: "tiltNavigation")
+        deviceID = defaults.string(forKey: "deviceID")
+            ?? PointingDevice.identifier(vendorID: defaultVendorID, productID: defaultProductID)
         launchAtLogin = SMAppService.mainApp.status == .enabled
         trace("launch at login: \(Self.describe(SMAppService.mainApp.status))")
 
+        devices = DeviceCatalog.connected()
+        applyDevice(restartMonitor: false)
         MapperOptions.shared.middleClick = middleClick
         MapperOptions.shared.spaceSwitching = spaceSwitching
         MapperOptions.shared.tiltNavigation = tiltNavigation
+    }
+
+    /// Re-reads the attached devices, keeping the current selection if it is
+    /// still present so unplugging something else does not retarget the app.
+    func refreshDevices() {
+        devices = DeviceCatalog.connected()
+    }
+
+    private func applyDevice(restartMonitor: Bool = true) {
+        let parts = deviceID.split(separator: ":")
+        guard parts.count == 2,
+              let vendor = Int64(parts[0], radix: 16),
+              let product = Int64(parts[1], radix: 16)
+        else { return }
+        MapperOptions.shared.vendorID = vendor
+        MapperOptions.shared.productID = product
+        SenderCache.shared.forget()
+        trace("target device: \(deviceID)")
+        if restartMonitor, enabled {
+            WheelButtonMonitor.restart()
+        }
     }
 
     static func describe(_ status: SMAppService.Status) -> String {
@@ -106,7 +144,9 @@ final class Settings: ObservableObject {
             trace("launch at login -> \(Self.describe(SMAppService.mainApp.status))")
         } catch {
             trace("launch at login change failed: \(error.localizedDescription)")
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            deviceID = defaults.string(forKey: "deviceID")
+            ?? PointingDevice.identifier(vendorID: defaultVendorID, productID: defaultProductID)
+        launchAtLogin = SMAppService.mainApp.status == .enabled
         }
     }
 }

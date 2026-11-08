@@ -92,6 +92,14 @@ if arguments.contains("--check-permissions") {
     exit(0)
 }
 
+if arguments.contains("--devices") {
+    for device in DeviceCatalog.connected() {
+        let marker = device.hasVendorCollection ? " (has vendor collection)" : ""
+        print("\(device.hexIdentifier)  \(device.name)\(marker)")
+    }
+    exit(0)
+}
+
 if arguments.contains("--login-register") {
     // SMAppService reports its status but not why; this surfaces the error.
     MainActor.assumeIsolated {

@@ -59,6 +59,36 @@ struct PanelView: View {
             }
 
             GlassCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "cable.connector")
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(width: 20)
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Mouse").font(.system(size: 12.5, weight: .medium))
+                            Text("Only this device's buttons are remapped")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    Picker("", selection: $settings.deviceID) {
+                        ForEach(settings.devices) { device in
+                            Text("\(device.name) · \(device.hexIdentifier)").tag(device.id)
+                        }
+                        if !settings.devices.contains(where: { $0.id == settings.deviceID }) {
+                            Text("\(settings.deviceID) (not connected)").tag(settings.deviceID)
+                        }
+                    }
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .onAppear { settings.refreshDevices() }
+                }
+                .padding(14)
+            }
+
+            GlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     ToggleRow(
                         title: "Middle click",
