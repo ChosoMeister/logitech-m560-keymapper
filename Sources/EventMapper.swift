@@ -359,9 +359,13 @@ func mapperCallback(
                 return nil
             }
         }
-        // Left Command is part of both the back-button chord and the wheel chord.
+        // Left Command belongs to both the back button's chord and the wheel's.
+        // Only the wheel's carries Option, so with space switching off this
+        // must let the back button's Command through — otherwise its D
+        // arrives alone and the app sees a bare D instead of Command+D.
         if keyCode == 0x37 {
-            guard options.spaceSwitching || options.middleClick else {
+            let partOfWheelChord = event.flags.contains(.maskAlternate)
+            guard options.spaceSwitching || (options.middleClick && partOfWheelChord) else {
                 return Unmanaged.passUnretained(event)
             }
             return nil

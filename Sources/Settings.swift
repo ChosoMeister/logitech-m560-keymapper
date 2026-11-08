@@ -118,6 +118,9 @@ final class Settings: ObservableObject {
             permissionDenied = !started
         } else {
             EventMapper.shared.stop()
+            // The monitor posts clicks on its own, so leaving it running would
+            // keep the wheel button working while the panel says "paused".
+            WheelButtonMonitor.stop()
             permissionDenied = false
         }
     }

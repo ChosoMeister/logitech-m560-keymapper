@@ -135,6 +135,11 @@ if arguments.contains("--diagnose") || arguments.contains("--headless") {
         fputs("Could not create the input event tap. Grant Accessibility/Input Monitoring access and run it again.\n", stderr)
         exit(2)
     }
+    // The middle click comes from the monitor, not the tap: without it
+    // headless mode would suppress the chords and emit nothing.
+    if !EventMapper.shared.diagnoseOnly {
+        _ = WheelButtonMonitor.start()
+    }
     print(EventMapper.shared.diagnoseOnly
         ? "M560 diagnostic active (read-only). Press the requested button, then Control-C to stop."
         : "M560 mapper active (headless). Press Control-C to stop.")

@@ -12,7 +12,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    # The panel uses the Liquid Glass API, which needs the macOS 26 SDK to
+    # compile; #available only guards it at runtime. The app still runs on
+    # macOS 13, which LSMinimumSystemVersion states.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 

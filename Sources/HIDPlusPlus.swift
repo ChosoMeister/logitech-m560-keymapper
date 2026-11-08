@@ -242,6 +242,7 @@ enum WheelButtonMonitor {
         guard isRunning else { return }
         if let device { IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone)) }
         if let runLoop { CFRunLoopStop(runLoop) }
+        WheelButton.shared.forgetFeature()
         device = nil
         runLoop = nil
         manager = nil
@@ -314,13 +315,15 @@ private func wheelReportSeen(
     guard length >= 6 else { return }
     let data = UnsafeBufferPointer(start: bytes, count: length)
     // A diverted-button notification: long report, event function 0, a control
-    // id in the next two bytes and nothing after it. Other HID++ notifications
-    // on the same channel, such as battery reports, carry further payload, so
-    // requiring the tail to be empty keeps them out without hardcoding one
-    // device's feature index.
+    // id in the next two bytes and nothing after it. The shape alone is not
+    // conclusive — another feature could emit it — so the feature index that
+    // produced the first press is remembered and required from then on, and
+    // WheelButton abandons a press that outlasts any real hold.
     guard data[0] == 0x11, data[3] == 0x00 else { return }
     guard data.count <= 6 || data[6...].allSatisfy({ $0 == 0 }) else { return }
+    let featureIndex = data[2]
     let control = UInt16(data[4]) << 8 | UInt16(data[5])
+    guard WheelButton.shared.accepts(featureIndex: featureIndex, pressing: control != 0) else { return }
 
     guard MapperOptions.shared.middleClick else { return }
     if control != 0 {
@@ -340,13 +343,38 @@ private func wheelReportSeen(
 /// from keyboard chords, so holding and dragging are genuine.
 final class WheelButton: @unchecked Sendable {
     static let shared = WheelButton()
+
+    /// No one holds a mouse button this long on purpose. A press still down
+    /// after this was a misread notification, not a button.
+    private static let maxHold: CFAbsoluteTime = 30
+
     private let lock = NSLock()
     private var isDown = false
+    private var pressedAt: CFAbsoluteTime = 0
+    private var knownFeatureIndex: UInt8?
+
+    /// Binds to the feature that first looked like a button press, so another
+    /// feature emitting the same shape cannot drive the synthetic button.
+    func accepts(featureIndex: UInt8, pressing: Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let known = knownFeatureIndex { return known == featureIndex }
+        guard pressing else { return false }
+        knownFeatureIndex = featureIndex
+        return true
+    }
+
+    /// Forgets the learned feature index; the next device numbers its
+    /// features differently.
+    func forgetFeature() {
+        lock.lock(); knownFeatureIndex = nil; lock.unlock()
+    }
 
     func press() -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard !isDown else { return false }
         isDown = true
+        pressedAt = CFAbsoluteTimeGetCurrent()
         return true
     }
 
@@ -358,7 +386,13 @@ final class WheelButton: @unchecked Sendable {
     }
 
     var held: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return isDown
+        lock.lock()
+        defer { lock.unlock() }
+        guard isDown else { return false }
+        if CFAbsoluteTimeGetCurrent() - pressedAt > Self.maxHold {
+            isDown = false
+            return false
+        }
+        return true
     }
 }
