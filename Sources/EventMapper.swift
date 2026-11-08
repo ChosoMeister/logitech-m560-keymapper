@@ -182,6 +182,7 @@ func senderID(for event: CGEvent) -> UInt64? {
 
 private func log(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
+    trace(message)
 }
 
 private func postShortcut(keyCode: CGKeyCode, modifiers: CGEventFlags) {
@@ -321,6 +322,11 @@ func mapperCallback(
         return nil
     }
 
+    if isReceiver {
+        // M560 button traffic only: a few events per press, not a hot path.
+        log("recv type=\(eventName(type)) key=\(event.getIntegerValueField(.keyboardEventKeycode)) flags=\(String(event.flags.rawValue, radix: 16))")
+    }
+
     guard isReceiver else { return Unmanaged.passUnretained(event) }
 
     switch type {
@@ -332,6 +338,26 @@ func mapperCallback(
             guard options.spaceSwitching else { return Unmanaged.passUnretained(event) }
             if commandIsDown { enqueueShortcut(keyCode: 0x7b, modifiers: .maskControl) }
             return nil
+        }
+        // The wheel button mostly reports a modifier-only chord: left Option
+        // and left Command pressed together, with no key event at all. On this
+        // device that pair is unambiguous, because the side buttons report
+        // right Command and Command+D instead. Treat the pair going down as
+        // the button going down, and either modifier lifting as its release.
+        if options.middleClick, keyCode == 0x3a || keyCode == 0x37 {
+            let optionIsDown = event.flags.contains(.maskAlternate)
+            if optionIsDown, commandIsDown {
+                if MiddleButtonState.shared.press() {
+                    log("map wheel chord (option+command) -> middle button down")
+                    enqueueMiddleButton(down: true)
+                }
+                return nil
+            }
+            if !event.flags.contains(.maskControl), MiddleButtonState.shared.release() {
+                log("map wheel chord release -> middle button up")
+                enqueueMiddleButton(down: false)
+                return nil
+            }
         }
         // Left Command is part of both the back-button chord and the wheel chord.
         if keyCode == 0x37 {
@@ -362,14 +388,14 @@ func mapperCallback(
             && event.flags.contains(.maskControl)
         if options.middleClick, type == .keyDown, isMiddleButtonChord {
             if MiddleButtonState.shared.press() {
-                if options.trace { log("map M560 wheel chord -> middle button down") }
+                log("map wheel chord -> middle button down")
                 enqueueMiddleButton(down: true)
             }
             return nil
         }
         if options.middleClick, type == .keyUp, keyCode == 0x30 {
             if MiddleButtonState.shared.release() {
-                if options.trace { log("map M560 wheel chord -> middle button up") }
+                log("map wheel chord -> middle button up")
                 enqueueMiddleButton(down: false)
             }
             return nil
@@ -432,6 +458,7 @@ final class EventMapper {
                 callback: mapperCallback,
                 userInfo: nil
             ) else {
+                log("tap creation failed: no Accessibility permission")
                 ready.signal()
                 return
             }
@@ -443,6 +470,7 @@ final class EventMapper {
             self.runLoopSource = source
             self.tapRunLoop = CFRunLoopGetCurrent()
             created = true
+            log("tap created and enabled on its own thread")
             ready.signal()
 
             CFRunLoopRun()
