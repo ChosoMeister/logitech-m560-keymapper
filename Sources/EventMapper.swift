@@ -157,6 +157,16 @@ private final class MiddleButtonState: @unchecked Sendable {
         return true
     }
 
+    /// True when a press is already outstanding, meaning its release chord
+    /// never arrived. The hardware drops that chord often enough that the
+    /// press after it would otherwise be swallowed, which showed up as the
+    /// button working every other time.
+    func isStuck() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isDown
+    }
+
     /// Returns true when a press was outstanding and is now released.
     func release() -> Bool {
         lock.lock()
@@ -385,6 +395,11 @@ func mapperCallback(
         // the button going down, and either modifier lifting as its release.
         if options.middleClick, keyCode == 0x3a || keyCode == 0x37 {
             if event.flags.contains(.maskAlternate), commandIsDown {
+                if MiddleButtonState.shared.isStuck() {
+                    log("press while still down: releasing the missed one first")
+                    _ = MiddleButtonState.shared.release()
+                    enqueueMiddleButton(down: false)
+                }
                 if MiddleButtonState.shared.press() {
                     log("map wheel press (option+command) -> middle button down")
                     enqueueMiddleButton(down: true)
