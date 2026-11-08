@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 @MainActor
@@ -88,6 +89,21 @@ let arguments = CommandLine.arguments
 
 if arguments.contains("--check-permissions") {
     print("accessibilityTrusted=\(AXIsProcessTrusted())")
+    exit(0)
+}
+
+if arguments.contains("--login-register") {
+    // SMAppService reports its status but not why; this surfaces the error.
+    MainActor.assumeIsolated {
+        let service = SMAppService.mainApp
+        trace("login item before: \(Settings.describe(service.status))")
+        do {
+            try service.register()
+            trace("login item register ok, now: \(Settings.describe(service.status))")
+        } catch {
+            trace("login item register failed: \(error)")
+        }
+    }
     exit(0)
 }
 
