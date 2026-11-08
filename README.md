@@ -34,12 +34,16 @@ that depend on holding the middle button work too.
 ## Build and run
 
 ```sh
-./build.sh
+./build.sh --install
 ```
 
 ```sh
-open M560Mapper.app
+open /Applications/M560Mapper.app
 ```
+
+`--install` copies the bundle to `/Applications`, which is where a login-item
+agent belongs. The Accessibility grant follows the signing certificate rather
+than the path, so moving the app does not disturb it.
 
 The build produces `M560Mapper.app`, a background agent with no Dock icon. It
 appears in the menu bar as a mouse glyph. Clicking it opens a Liquid Glass

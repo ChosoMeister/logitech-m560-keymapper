@@ -52,10 +52,21 @@ final class Settings: ObservableObject {
         spaceSwitching = defaults.bool(forKey: "spaceSwitching")
         tiltNavigation = defaults.bool(forKey: "tiltNavigation")
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        trace("launch at login: \(Self.describe(SMAppService.mainApp.status))")
 
         MapperOptions.shared.middleClick = middleClick
         MapperOptions.shared.spaceSwitching = spaceSwitching
         MapperOptions.shared.tiltNavigation = tiltNavigation
+    }
+
+    static func describe(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .enabled: return "enabled"
+        case .notRegistered: return "notRegistered"
+        case .notFound: return "notFound"
+        case .requiresApproval: return "requiresApproval"
+        @unknown default: return "unknown"
+        }
     }
 
     var hasAccessibilityPermission: Bool { AXIsProcessTrusted() }
@@ -89,8 +100,9 @@ final class Settings: ObservableObject {
                     try SMAppService.mainApp.unregister()
                 }
             }
+            trace("launch at login -> \(Self.describe(SMAppService.mainApp.status))")
         } catch {
-            NSLog("M560Mapper: login item change failed: \(error.localizedDescription)")
+            trace("launch at login change failed: \(error.localizedDescription)")
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
     }

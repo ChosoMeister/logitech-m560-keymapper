@@ -29,3 +29,11 @@ else
 fi
 
 echo "Built $APP"
+
+# A login-item agent belongs in /Applications; the Accessibility grant follows
+# the signing certificate, not the path, so moving it costs nothing.
+if [ "${1:-}" = "--install" ]; then
+	rm -rf "/Applications/$APP"
+	cp -R "$APP" /Applications/
+	echo "Installed /Applications/$APP"
+fi

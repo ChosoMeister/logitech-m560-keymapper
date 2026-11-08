@@ -448,6 +448,7 @@ final class EventMapper {
     var diagnoseOnly = false
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    nonisolated(unsafe) private static var loggedPermissionFailure = false
     private var tapRunLoop: CFRunLoop?
     private var tapThread: Thread?
 
@@ -482,7 +483,12 @@ final class EventMapper {
                 callback: mapperCallback,
                 userInfo: nil
             ) else {
-                log("tap creation failed: no Accessibility permission")
+                // The watchdog retries every two seconds; say so once rather
+                // than filling the log while permission is pending.
+                if !Self.loggedPermissionFailure {
+                    Self.loggedPermissionFailure = true
+                    log("tap creation failed: no Accessibility permission (retrying)")
+                }
                 ready.signal()
                 return
             }
@@ -494,6 +500,7 @@ final class EventMapper {
             self.runLoopSource = source
             self.tapRunLoop = CFRunLoopGetCurrent()
             created = true
+            Self.loggedPermissionFailure = false
             log("tap created and enabled on its own thread")
             ready.signal()
 
