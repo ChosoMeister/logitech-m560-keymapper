@@ -91,6 +91,12 @@ if arguments.contains("--check-permissions") {
     exit(0)
 }
 
+if arguments.contains("--hidlisten") {
+    MapperOptions.shared.trace = true
+    HIDPlusPlus.listen(seconds: 45)
+    exit(0)
+}
+
 if arguments.contains("--hidpp") {
     MapperOptions.shared.trace = true
     HIDPlusPlus.probe()

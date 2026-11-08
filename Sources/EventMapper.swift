@@ -130,39 +130,6 @@ final class MapperOptions: @unchecked Sendable {
     }
 }
 
-/// Neither chord is an edge of the button: both mean "pressed", and the
-/// firmware is erratic about which it sends. Captures show presses that emit
-/// only Option+Command, presses that emit only Control+Command+Tab, and
-/// presses that emit both, the second 320-480ms behind the first.
-///
-/// So either chord fires a click, and this window collapses the pairs. Taps
-/// land about 1.2s apart, well clear of it. The cost is a press held for
-/// longer than the window, which can emit the second chord late enough to
-/// click twice; the hardware gives nothing that marks a button still held, so
-/// that case cannot be told apart from two quick presses.
-private final class MiddleButtonState: @unchecked Sendable {
-    static let shared = MiddleButtonState()
-    // Paired chords have been measured 320-583ms apart, so the window has to
-    // clear 583ms; at 500ms a pair was read as two presses and closed two
-    // tabs. Deliberate taps that land inside this window are read as one
-    // press, which is the cost of reading the button through its chords.
-    private static let window: CFAbsoluteTime = 0.8
-
-    private let lock = NSLock()
-    private var lastFiredAt: CFAbsoluteTime = 0
-
-    /// True when this chord should click, false when it is the second chord
-    /// of a press that has already clicked.
-    func fire() -> Bool {
-        let now = CFAbsoluteTimeGetCurrent()
-        lock.lock()
-        defer { lock.unlock() }
-        guard now - lastFiredAt >= Self.window else { return false }
-        lastFiredAt = now
-        return true
-    }
-}
-
 let injectionQueue = DispatchQueue(label: "M560Mapper.event-injection", qos: .userInteractive)
 
 func eventName(_ type: CGEventType) -> String {
@@ -266,7 +233,7 @@ func enqueueMiddleButton(down: Bool) {
 }
 
 /// Forwards pointer motion as a middle-button drag while the wheel button is
-/// held, so middle-drag gestures reach the app.
+/// held, which is possible now the HID++ edges say when it is held.
 private func postMiddleDrag(at location: CGPoint) {
     guard let source = CGEventSource(stateID: .hidSystemState),
           let event = CGEvent(
@@ -316,6 +283,10 @@ func mapperCallback(
         // instead of on every move; it only feeds the wheel-tilt fallback.
         if PointerSource.shared.shouldResample() {
             pointerSourceUpdate(event)
+        }
+        if WheelButton.shared.held, type == .mouseMoved {
+            injectionQueue.async { postMiddleDrag(at: event.location) }
+            return nil
         }
         return Unmanaged.passUnretained(event)
     }
@@ -375,11 +346,9 @@ func mapperCallback(
         // right Command and Command+D instead. Treat the pair going down as
         // the button going down, and either modifier lifting as its release.
         if options.middleClick, keyCode == 0x3a || keyCode == 0x37 {
+            // Suppressed only. The chords are an unreliable side effect of the
+            // wheel button; the HID++ monitor supplies the real edges.
             if event.flags.contains(.maskAlternate), commandIsDown {
-                if MiddleButtonState.shared.fire() {
-                    log("map wheel press (option+command) -> middle click")
-                    enqueueMiddleClick()
-                }
                 return nil
             }
         }
@@ -403,10 +372,6 @@ func mapperCallback(
             && event.flags.contains(.maskCommand)
             && event.flags.contains(.maskControl)
         if options.middleClick, type == .keyDown, isMiddleButtonChord {
-            if MiddleButtonState.shared.fire() {
-                log("map wheel press (control+command+tab) -> middle click")
-                enqueueMiddleClick()
-            }
             return nil
         }
         if options.middleClick, type == .keyUp, keyCode == 0x30 {
@@ -513,6 +478,7 @@ final class EventMapper {
 
     func stop() {
         guard isRunning, let tapRunLoop, let tap else { return }
+        if WheelButton.shared.release() { enqueueMiddleButton(down: false) }
         CGEvent.tapEnable(tap: tap, enable: false)
         CFRunLoopStop(tapRunLoop)
         tapThread = nil

@@ -74,6 +74,9 @@ final class Settings: ObservableObject {
     func applyRunState() {
         if enabled {
             let started = EventMapper.shared.start()
+            if started, !WheelButtonMonitor.isRunning {
+                _ = WheelButtonMonitor.start()
+            }
             permissionDenied = !started
         } else {
             EventMapper.shared.stop()
